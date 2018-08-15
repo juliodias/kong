@@ -22,6 +22,9 @@ local max          = math.max
 local sub          = string.sub
 
 
+local DEFAULT_OPTIONS = { null = ngx.null }
+
+
 local Schema       = {}
 Schema.__index     = Schema
 
@@ -659,10 +662,9 @@ end
 -- in which case they return a type-specific default.
 -- If a default value cannot be produced (due to circumstances that
 -- will produce errors later on validation), it simply returns `nil`.
-local function default_value(field)
-
+local function default_value(field, options)
   if field.nullable ~= false then
-    return null
+    return options and options.null
   end
 
   if field.type == "array" or field.type == "set"
@@ -703,7 +705,7 @@ end
 -- @param k The field name.
 -- @param field The field definition table.
 -- @param entity The entity object where key `k` is missing.
-local function handle_missing_field(k, field, entity)
+local function handle_missing_field(k, field, entity, options)
   if field.default ~= nil then
     entity[k] = tablex.deepcopy(field.default)
     return
@@ -715,7 +717,7 @@ local function handle_missing_field(k, field, entity)
     return
   end
 
-  entity[k] = default_value(field)
+  entity[k] = default_value(field, options)
 end
 
 
@@ -1057,13 +1059,13 @@ end
 -- valid values are: "insert", "update"
 -- @return A new table, with the auto fields containing
 -- appropriate updated values.
-function Schema:process_auto_fields(input, context)
+function Schema:process_auto_fields(input, context, options)
   local output = tablex.deepcopy(input)
   local now_s  = ngx_time()
   local now_ms = ngx_now()
 
   for key, field in self:each_field() do
-    if field.auto then
+    if field.auto and context == "insert" or context == "update" or context == "upsert" then
       if field.uuid and context == "insert" then
         output[key] = utils.uuid()
       elseif field.uuid and context == "upsert" and output[key] == nil then
@@ -1094,12 +1096,15 @@ function Schema:process_auto_fields(input, context)
       elseif field_type == "record" then
         if field_value ~= null then
           local field_schema = get_field_schema(field)
-          output[key] = field_schema:process_auto_fields(field_value, context)
+          output[key] = field_schema:process_auto_fields(field_value, context, options)
         end
       end
 
-    elseif context ~= "update" then
-      handle_missing_field(key, field, output)
+    elseif context == nil or context == "insert" or context == "upsert" then
+      handle_missing_field(key, field, output, DEFAULT_OPTIONS)
+
+    elseif context == "select" then
+      handle_missing_field(key, field, output, options)
     end
   end
 

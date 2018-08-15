@@ -9,7 +9,6 @@ local type         = type
 local ngx          = ngx
 local timer_every  = ngx.timer.every
 local get_phase    = ngx.get_phase
-local null         = ngx.null
 local log          = ngx.log
 
 
@@ -110,9 +109,6 @@ local function connect(config)
   end
 
   local connection = pgmoon.new(config)
-
-  connection.convert_null = true
-  connection.NULL         = null
 
   local ok, err = connection:connect()
   if not ok then

@@ -4,6 +4,10 @@ local cjson = require "cjson"
 
 local fmt           = string.format
 local rep           = string.rep
+local null          = ngx.null
+local error         = error
+local pairs         = pairs
+local ipairs        = ipairs
 local insert        = table.insert
 local concat        = table.concat
 local setmetatable  = setmetatable
@@ -232,7 +236,7 @@ end
 local function serialize_arg(field, arg)
   local serialized_arg
 
-  if arg == ngx.null then
+  if arg == null then
     serialized_arg = cassandra.null
 
   elseif field.uuid then
@@ -289,8 +293,8 @@ local function serialize_foreign_pk(db_columns, args, args_names, foreign_pk)
   for _, db_column in ipairs(db_columns) do
     local to_serialize
 
-    if foreign_pk == ngx.null then
-      to_serialize = ngx.null
+    if foreign_pk == null then
+      to_serialize = null
 
     else
       to_serialize = foreign_pk[db_column.foreign_field_name]
@@ -444,8 +448,8 @@ function _M.new(connector, schema, errors)
         insert(select_foreign_bind_args, foreign_key_column.col_name .. " = ?")
       end
 
-      self[method_name] = function(self, foreign_key, size, offset)
-        return self:page(size, offset, foreign_key, db_columns)
+      self[method_name] = function(self, foreign_key, size, offset, options)
+        return self:page(size, offset, options, foreign_key, db_columns)
       end
     end
   end
@@ -460,7 +464,7 @@ local function deserialize_row(self, row)
   end
 
   -- deserialize rows
-  -- replace `nil` fields with `ngx.null`
+  -- replace `ngx.null` fields with `nil`
   -- replace `foreign_key` with `foreign = { key = "" }`
   -- return timestamps in seconds instead of ms
 
@@ -492,8 +496,8 @@ local function deserialize_row(self, row)
       row[field_name] = cjson.decode(row[field_name])
     end
 
-    if row[field_name] == nil then
-      row[field_name] = ngx.null
+    if row[field_name] == null then
+      row[field_name] = nil
     end
   end
 
@@ -507,9 +511,6 @@ local function _select(self, cql, args)
     return nil, self.errors:database_error("could not execute selection query: "
                                            .. err)
   end
-
-  -- lua-cassandra returns `nil` values for Cassandra's `NULL`. We need to
-  -- populate `ngx.null` ourselves
 
   local row = rows[1]
   if not row then
@@ -547,7 +548,7 @@ function _mt:insert(entity, options)
     if field.type == "foreign" then
       local foreign_pk = entity[field_name]
 
-      if foreign_pk ~= ngx.null then
+      if foreign_pk ~= null then
         -- if given, check if this foreign entity exists
         local exists, err_t = foreign_pk_exists(self, field_name, field, foreign_pk)
         if not exists then
@@ -560,7 +561,7 @@ function _mt:insert(entity, options)
 
     else
       if field.unique
-        and entity[field_name] ~= ngx.null
+        and entity[field_name] ~= null
         and entity[field_name] ~= nil
       then
         -- a UNIQUE constaint is set on this field.
@@ -612,12 +613,16 @@ function _mt:insert(entity, options)
     local value = entity[field_name]
 
     if field.type == "foreign" then
-      if value ~= ngx.null and value ~= nil then
+      if value ~= null and value ~= nil then
         value = extract_pk_values(field.schema, value)
 
       else
-        value = ngx.null
+        value = nil
       end
+    end
+
+    if value == null then
+      value = nil
     end
 
     res[field_name] = value
@@ -664,7 +669,7 @@ do
   local opts = new_tab(0, 2)
 
 
-  function _mt:page(size, offset, foreign_key, foreign_key_db_columns)
+  function _mt:page(size, offset, options, foreign_key, foreign_key_db_columns)
     if offset then
       local offset_decoded = decode_base64(offset)
       if not offset_decoded then
@@ -778,6 +783,7 @@ do
       rows_idx     = nil,
       offset       = nil,
       size         = size,
+      options      = options,
       strategy     = self,
     }
 
@@ -813,7 +819,7 @@ do
         if field.type == "foreign" then
           local foreign_pk = entity[field_name]
 
-          if foreign_pk ~= ngx.null then
+          if foreign_pk ~= null then
             -- if given, check if this foreign entity exists
             local exists, err_t = foreign_pk_exists(self, field_name, field, foreign_pk)
             if not exists then
@@ -825,7 +831,7 @@ do
           serialize_foreign_pk(db_columns, args, args_names, foreign_pk)
 
         else
-          if field.unique and entity[field_name] ~= ngx.null then
+          if field.unique and entity[field_name] ~= null then
             -- a UNIQUE constaint is set on this field.
             -- We unfortunately follow a read-before-write pattern in this case,
             -- but this is made necessary for Kong to behave in a
@@ -1045,8 +1051,8 @@ function _mt:delete_by_field(field_name, field_value, options)
 end
 
 
-function _mt:truncate()
-  return self.connector:truncate_table(self.schema.name)
+function _mt:truncate(options)
+  return self.connector:truncate_table(self.schema.name, options)
 end
 
 

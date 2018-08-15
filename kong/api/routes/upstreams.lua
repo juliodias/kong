@@ -9,6 +9,7 @@ local function select_upstream(db, upstream_id)
   if utils.is_valid_uuid(id) then
     return db.upstreams:select({ id = id })
   end
+
   return db.upstreams:select_by_name(id)
 end
 
@@ -16,6 +17,7 @@ end
 local function select_target(db, upstream, target_id)
   local id = ngx.unescape_uri(target_id)
   local filter = utils.is_valid_uuid(id) and { id = id } or { target = id }
+
   return db.targets:for_upstream_first({ id = upstream.id }, filter)
 end
 
@@ -25,14 +27,21 @@ local function post_health(self, db, is_healthy)
   if err_t then
     return endpoints.handle_error(err_t)
   end
+
+  if not upstream then
+    return responses.send_HTTP_NOT_FOUND()
+  end
+
   local target, _, err_t = select_target(db, upstream, self.params.targets)
   if err_t then
     return endpoints.handle_error(err_t)
   end
 
-  local ok, err = db.targets:post_health(upstream, target, is_healthy)
-  if not ok then
-    responses.send_HTTP_BAD_REQUEST(err)
+  if target then
+    local ok, err = db.targets:post_health(upstream, target, is_healthy)
+    if not ok then
+      responses.send_HTTP_BAD_REQUEST(err)
+    end
   end
 
   return responses.send_HTTP_NO_CONTENT()
@@ -52,21 +61,22 @@ return {
         return endpoints.handle_error(err_t)
       end
 
+      if not upstream then
+        return responses.send_HTTP_NOT_FOUND()
+      end
+
       local targets_with_health, _, err_t, offset =
-      db.targets:for_upstream_with_health({ id = upstream.id },
-                                          tonumber(self.args.size),
-                                          self.args.offset)
-      if not targets_with_health then
+        db.targets:for_upstream_with_health({ id = upstream.id },
+                                            tonumber(self.args.size),
+                                            self.args.offset)
+      if err_t then
         return endpoints.handle_error(err_t)
       end
 
-      local next_page = ngx.null
-      if offset then
-        next_page = string.format("/upstreams/%s/health?offset=%s",
-                                  ngx.escape_uri(upstream.id),
-                                  ngx.escape_uri(offset))
+      local next_page = offset and string.format("/upstreams/%s/health?offset=%s",
+                                                 ngx.escape_uri(upstream.id),
+                                                 ngx.escape_uri(offset)) or ngx.null
 
-      end
 
       return responses.send_HTTP_OK({
         data    = targets_with_health,
@@ -83,26 +93,26 @@ return {
       if err_t then
         return endpoints.handle_error(err_t)
       end
-      local targets, _, err_t, offset =
-        db.targets:for_upstream_raw({ id = upstream.id },
-                                    tonumber(self.args.size),
-                                    self.args.offset)
+
+      if not upstream then
+        return responses.send_HTTP_NOT_FOUND()
+      end
+
+      local targets, _, err_t, offset = db.targets:for_upstream_raw({ id = upstream.id },
+                                                                tonumber(self.args.size),
+                                                                self.args.offset)
       if not targets then
         return endpoints.handle_error(err_t)
       end
 
-      local next_page
-      if offset then
-        next_page = string.format("/upstreams/%s/targets/all?offset=%s",
-                                  ngx.escape_uri(upstream.id),
-                                  ngx.escape_uri(offset))
-      end
-
+      local next_page = offset and string.format("/upstreams/%s/targets/all?offset=%s",
+                                                 ngx.escape_uri(upstream.id),
+                                                 ngx.escape_uri(offset)) or ngx.null
 
       return responses.send_HTTP_OK({
-        data  = targets,
-        offset  = offset,
-        next    = next_page,
+        data   = targets,
+        offset = offset,
+        next   = next_page,
       })
     end
   },
@@ -125,14 +135,23 @@ return {
       if err_t then
         return endpoints.handle_error(err_t)
       end
+
+      if not upstream then
+        return responses.send_HTTP_NOT_FOUND()
+      end
+
       local target, _, err_t = select_target(db, upstream, self.params.targets)
       if err_t then
         return endpoints.handle_error(err_t)
       end
-      local _, _, err_t = db.targets:delete({ id = target.id })
-      if err_t then
-        return endpoints.handle_error(err_t)
+
+      if target then
+        local _, _, err_t = db.targets:delete({ id = target.id })
+        if err_t then
+          return endpoints.handle_error(err_t)
+        end
       end
+
       return responses.send_HTTP_NO_CONTENT()
     end
   }

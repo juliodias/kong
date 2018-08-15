@@ -10,7 +10,6 @@ local unescape_uri = ngx.unescape_uri
 local tonumber     = tonumber
 local tostring     = tostring
 local null         = ngx.null
-local next         = next
 local type         = type
 local fmt          = string.format
 
@@ -50,22 +49,20 @@ end
 
 
 local function extract_options(args, schema, context)
-  if type(args) ~= "table" then
-    return
+  local options = {
+    null = null,
+  }
+
+  if args and schema and context then
+    if schema.ttl == true and args.ttl ~= nil and (context == "insert" or
+                                                   context == "update" or
+                                                   context == "upsert") then
+      options.ttl = tonumber(args.ttl) or args.ttl
+      args.ttl = nil
+    end
   end
 
-  local options = {}
-
-  if schema.ttl == true and args.ttl ~= nil and (context == "insert" or
-                                                 context == "update" or
-                                                 context == "upsert") then
-    options.ttl = tonumber(args.ttl) or args.ttl
-    args.ttl = nil
-  end
-
-  if next(options) then
-    return options
-  end
+  return options
 end
 
 
